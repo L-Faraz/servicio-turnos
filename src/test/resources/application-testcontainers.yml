@@ -21,3 +21,8 @@ app:
 catedra:
   api-base-url: http://catedra.test
   jwt-token: test-token
+  kafka-enabled: false
+
+turnos:
+  outbox:
+    enabled: false

@@ -8,9 +8,14 @@ import org.springframework.stereotype.Component;
 public class TurnosProperties {
 
     private final Availability availability = new Availability();
+    private final Outbox outbox = new Outbox();
 
     public Availability getAvailability() {
         return availability;
+    }
+
+    public Outbox getOutbox() {
+        return outbox;
     }
 
     public static class Availability {
@@ -23,6 +28,46 @@ public class TurnosProperties {
 
         public void setMaxDays(int maxDays) {
             this.maxDays = Math.max(1, maxDays);
+        }
+    }
+
+    public static class Outbox {
+
+        private boolean enabled = true;
+        private int maxAttempts = 5;
+        private long retryInitialMs = 2000;
+        private long retryMultiplier = 2;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int getMaxAttempts() {
+            return maxAttempts;
+        }
+
+        public void setMaxAttempts(int maxAttempts) {
+            this.maxAttempts = Math.max(1, maxAttempts);
+        }
+
+        public long getRetryInitialMs() {
+            return retryInitialMs;
+        }
+
+        public void setRetryInitialMs(long retryInitialMs) {
+            this.retryInitialMs = Math.max(1, retryInitialMs);
+        }
+
+        public long getRetryMultiplier() {
+            return Math.max(1, retryMultiplier);
+        }
+
+        public void setRetryMultiplier(long retryMultiplier) {
+            this.retryMultiplier = Math.max(1, retryMultiplier);
         }
     }
 }

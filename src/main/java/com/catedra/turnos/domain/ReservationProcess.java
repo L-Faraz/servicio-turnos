@@ -67,6 +67,12 @@ public class ReservationProcess {
     @Column(name = "request_event_id", length = 100)
     private String requestEventId;
 
+    @Column(name = "phone_attempt", nullable = false)
+    private int phoneAttempt;
+
+    @Column(name = "patient_phone", length = 30)
+    private String patientPhone;
+
     @Column(name = "expires_at")
     private Instant expiresAt;
 

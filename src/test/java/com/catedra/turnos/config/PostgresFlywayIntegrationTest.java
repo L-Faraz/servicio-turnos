@@ -56,6 +56,25 @@ class PostgresFlywayIntegrationTest {
         assertThat(tableExists("appointment_hold")).isTrue();
     }
 
+    @Test
+    void flywayCreatesKafkaOutboxTablesAndColumns() {
+        assertThat(tableExists("outbox_event")).isTrue();
+        assertThat(tableExists("processed_event")).isTrue();
+        assertThat(columnExists("reservation_process", "phone_attempt")).isTrue();
+        assertThat(columnExists("reservation_process", "patient_phone")).isTrue();
+    }
+
+    private boolean columnExists(String tableName, String columnName) {
+        Integer count = jdbcTemplate.queryForObject(
+                "select count(*) from information_schema.columns "
+                        + "where table_schema = 'public' and table_name = ? and column_name = ?",
+                Integer.class,
+                tableName,
+                columnName
+        );
+        return count != null && count == 1;
+    }
+
     private boolean tableExists(String tableName) {
         Integer count = jdbcTemplate.queryForObject(
                 "select count(*) from information_schema.tables "

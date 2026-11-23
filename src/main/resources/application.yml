@@ -55,7 +55,33 @@ catedra:
   jwt-token: ${CATEDRA_JWT_TOKEN:}
   connect-timeout-ms: ${CATEDRA_CONNECT_TIMEOUT_MS:2000}
   read-timeout-ms: ${CATEDRA_READ_TIMEOUT_MS:3000}
+  group-id: ${CATEDRA_GROUP_ID:proyecto-l-faraz}
+  kafka-enabled: ${CATEDRA_KAFKA_ENABLED:true}
+  kafka-bootstrap-servers: ${CATEDRA_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  kafka-consumer-group-id: ${CATEDRA_KAFKA_CONSUMER_GROUP_ID:alumnos-${CATEDRA_GROUP_ID:proyecto-l-faraz}}
+  kafka-appointment-actions-topic: ${CATEDRA_KAFKA_APPOINTMENT_ACTIONS_TOPIC:alumnos.turnos.acciones.${CATEDRA_GROUP_ID:proyecto-l-faraz}}
+  kafka-appointment-phone-topic: ${CATEDRA_KAFKA_APPOINTMENT_PHONE_TOPIC:catedra.turnos.telefono.${CATEDRA_GROUP_ID:proyecto-l-faraz}}
+  kafka-dlt-topic: ${CATEDRA_KAFKA_DLT_TOPIC:alumnos.turnos.acciones.${CATEDRA_GROUP_ID:proyecto-l-faraz}.dlt}
+  kafka-security-protocol: ${CATEDRA_KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+  kafka-sasl-mechanism: ${CATEDRA_KAFKA_SASL_MECHANISM:}
+  kafka-sasl-jaas-config: ${CATEDRA_KAFKA_SASL_JAAS_CONFIG:}
+  kafka-ssl-truststore-location: ${CATEDRA_KAFKA_SSL_TRUSTSTORE_LOCATION:}
+  kafka-ssl-truststore-password: ${CATEDRA_KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+  kafka-ssl-truststore-type: ${CATEDRA_KAFKA_SSL_TRUSTSTORE_TYPE:JKS}
+  kafka-ssl-keystore-location: ${CATEDRA_KAFKA_SSL_KEYSTORE_LOCATION:}
+  kafka-ssl-keystore-password: ${CATEDRA_KAFKA_SSL_KEYSTORE_PASSWORD:}
+  kafka-ssl-keystore-type: ${CATEDRA_KAFKA_SSL_KEYSTORE_TYPE:JKS}
+  kafka-ssl-key-password: ${CATEDRA_KAFKA_SSL_KEY_PASSWORD:}
+  kafka-ssl-endpoint-identification-algorithm: ${CATEDRA_KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM:}
+  kafka-retry-initial-ms: ${CATEDRA_KAFKA_RETRY_INITIAL_MS:1000}
+  kafka-max-retries: ${CATEDRA_KAFKA_MAX_RETRIES:3}
 
 turnos:
   availability:
     max-days: ${TURNOS_AVAILABILITY_MAX_DAYS:31}
+  outbox:
+    enabled: ${TURNOS_OUTBOX_ENABLED:true}
+    max-attempts: ${TURNOS_OUTBOX_MAX_ATTEMPTS:5}
+    retry-initial-ms: ${TURNOS_OUTBOX_RETRY_INITIAL_MS:2000}
+    retry-multiplier: ${TURNOS_OUTBOX_RETRY_MULTIPLIER:2}
+    publish-interval-ms: ${TURNOS_OUTBOX_PUBLISH_INTERVAL_MS:2000}

@@ -2,10 +2,12 @@ package com.catedra.turnos.service;
 
 import com.catedra.turnos.client.CatalogoClient;
 import com.catedra.turnos.client.CatedraClient;
+import com.catedra.turnos.config.CatedraProperties;
 import com.catedra.turnos.domain.AppointmentHold;
 import com.catedra.turnos.domain.AppUser;
 import com.catedra.turnos.domain.ReservationProcess;
 import com.catedra.turnos.domain.enums.ProcessStatus;
+import com.catedra.turnos.dto.AdditionalInformationSubmittedEvent;
 import com.catedra.turnos.dto.AvailableSlotDTO;
 import com.catedra.turnos.dto.ConfirmedHoldResponse;
 import com.catedra.turnos.dto.CreateHoldRequest;
@@ -35,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -56,6 +59,9 @@ class ReservationServiceTest {
     @Mock
     private AppointmentHoldRepository holdRepository;
 
+    @Mock
+    private OutboxService outboxService;
+
     private ReservationService reservationService;
     private AppUser user;
     private LocalDate date;
@@ -68,7 +74,9 @@ class ReservationServiceTest {
                 catedraClient,
                 availabilityService,
                 processRepository,
-                holdRepository
+                holdRepository,
+                outboxService,
+                new CatedraProperties()
         );
 
         user = new AppUser();
@@ -122,7 +130,8 @@ class ReservationServiceTest {
         AppointmentHold hold = heldHold(expiresAt);
         ReservationProcess process = heldProcess();
         when(holdRepository.findByHoldIdAndUserId("hold-1", 1L)).thenReturn(Optional.of(hold));
-        when(processRepository.findByHoldIdAndStatus("hold-1", ProcessStatus.HELD)).thenReturn(Optional.of(process));
+        when(processRepository.findByHoldIdAndUserId("hold-1", 1L)).thenReturn(Optional.of(process));
+        when(catalogoClient.getProfessional(15L)).thenReturn(enabledProfessional());
         when(catedraClient.confirmHold(eq("hold-1"), any())).thenReturn(
                 new ConfirmHoldResponseDTO("process-1", "WAITING_FOR_PHONE", expiresAt)
         );
@@ -132,6 +141,7 @@ class ReservationServiceTest {
         assertThat(response.status()).isEqualTo("WAITING_FOR_PHONE");
         assertThat(process.getStatus()).isEqualTo(ProcessStatus.WAITING_FOR_PHONE);
         assertThat(hold.getStatus()).isEqualTo("CONFIRMED");
+        verify(catalogoClient).getProfessional(15L);
         verify(catedraClient).confirmHold(eq("hold-1"), org.mockito.ArgumentMatchers.argThat(request ->
                 "juan.perez".equals(request.externalPatientId())
                         && "Juan".equals(request.patientFirstName())
@@ -154,6 +164,8 @@ class ReservationServiceTest {
     void rejectsExpiredHold() {
         AppointmentHold hold = heldHold(Instant.now().minusSeconds(60));
         when(holdRepository.findByHoldIdAndUserId("hold-1", 1L)).thenReturn(Optional.of(hold));
+        when(processRepository.findByHoldIdAndUserId("hold-1", 1L)).thenReturn(Optional.of(heldProcess()));
+        when(catalogoClient.getProfessional(15L)).thenReturn(enabledProfessional());
 
         assertThatThrownBy(() -> reservationService.confirmHold(user, "hold-1"))
                 .isInstanceOfSatisfying(ApiException.class, exception ->
@@ -161,11 +173,85 @@ class ReservationServiceTest {
                 );
     }
 
+    @Test
+    void confirmHoldRevalidatesProfessionalBeforeCallingCatedra() {
+        AppointmentHold hold = heldHold(expiresAt);
+        when(holdRepository.findByHoldIdAndUserId("hold-1", 1L)).thenReturn(Optional.of(hold));
+        when(processRepository.findByHoldIdAndUserId("hold-1", 1L)).thenReturn(Optional.of(heldProcess()));
+        when(catalogoClient.getProfessional(15L)).thenReturn(new CatalogProfessionalDTO(
+                15L, "Ana", "Gomez", 3L, "Cardiologia", false, List.of()
+        ));
+
+        assertThatThrownBy(() -> reservationService.confirmHold(user, "hold-1"))
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getCode()).isEqualTo("PROFESSIONAL_DISABLED")
+                );
+        verify(catedraClient, never()).confirmHold(any(), any());
+    }
+
+    @Test
+    void submitPhoneEnqueuesAdditionalInformationSubmitted() {
+        ReservationProcess process = waitingProcess();
+        when(processRepository.findByProcessIdAndUserId("process-1", 1L)).thenReturn(Optional.of(process));
+
+        reservationService.submitPhone(user, "process-1", "+549 261 555-1234");
+
+        ArgumentCaptor<String> eventIdCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> topicCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(outboxService).enqueue(
+                eventIdCaptor.capture(),
+                topicCaptor.capture(),
+                keyCaptor.capture(),
+                payloadCaptor.capture()
+        );
+
+        assertThat(eventIdCaptor.getValue()).startsWith("phone-");
+        assertThat(topicCaptor.getValue()).isEqualTo("catedra.turnos.telefono.proyecto-l-faraz");
+        assertThat(keyCaptor.getValue()).isEqualTo("process-1");
+        assertThat(payloadCaptor.getValue()).isInstanceOf(AdditionalInformationSubmittedEvent.class);
+        AdditionalInformationSubmittedEvent event = (AdditionalInformationSubmittedEvent) payloadCaptor.getValue();
+        assertThat(event.eventType()).isEqualTo("AdditionalInformationSubmitted");
+        assertThat(event.requestEventId()).isEqualTo("request-1");
+        assertThat(event.information()).containsEntry("phoneNumber", "+5492615551234");
+        assertThat(event.schemaVersion()).isEqualTo(1);
+        assertThat(process.getStatus()).isEqualTo(ProcessStatus.PHONE_SUBMITTED);
+        assertThat(process.getPatientPhone()).isEqualTo("+5492615551234");
+    }
+
+    @Test
+    void submitPhoneIsIdempotentForSamePhone() {
+        ReservationProcess process = waitingProcess();
+        process.setStatus(ProcessStatus.PHONE_SUBMITTED);
+        process.setPatientPhone("+5492615551234");
+        when(processRepository.findByProcessIdAndUserId("process-1", 1L)).thenReturn(Optional.of(process));
+
+        reservationService.submitPhone(user, "process-1", "+549 261 555-1234");
+
+        verify(outboxService, never()).enqueue(any(), any(), any(), any());
+    }
+
+    private CatalogProfessionalDTO enabledProfessional() {
+        return new CatalogProfessionalDTO(
+                15L, "Ana", "Gomez", 3L, "Cardiologia", true, List.of()
+        );
+    }
+
+    private ReservationProcess waitingProcess() {
+        ReservationProcess process = heldProcess();
+        process.setStatus(ProcessStatus.WAITING_FOR_PHONE);
+        process.setRequestEventId("request-1");
+        process.setExpiresAt(expiresAt);
+        return process;
+    }
+
     private AppointmentHold heldHold(Instant holdExpiresAt) {
         AppointmentHold hold = new AppointmentHold();
         hold.setHoldId("hold-1");
         hold.setProcessId("process-1");
         hold.setUser(user);
+        hold.setProfessionalId(15L);
         hold.setStatus("HELD");
         hold.setExpiresAt(holdExpiresAt);
         return hold;

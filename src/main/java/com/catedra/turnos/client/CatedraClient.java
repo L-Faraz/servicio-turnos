@@ -1,6 +1,7 @@
 package com.catedra.turnos.client;
 
 import com.catedra.turnos.config.CatedraProperties;
+import com.catedra.turnos.dto.catedra.CatedraAppointmentDTO;
 import com.catedra.turnos.dto.catedra.ConfirmHoldRequestDTO;
 import com.catedra.turnos.dto.catedra.ConfirmHoldResponseDTO;
 import com.catedra.turnos.dto.catedra.HoldRequestDTO;
@@ -20,9 +21,11 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
+import org.springframework.core.ParameterizedTypeReference;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 @Component
@@ -87,6 +90,30 @@ public class CatedraClient {
                 .body(request)
                 .retrieve()
                 .body(ConfirmHoldResponseDTO.class));
+    }
+
+    public Optional<CatedraAppointmentDTO> findAppointment(String processId, String externalPatientId) {
+        String uri = UriComponentsBuilder.fromUriString(baseUrl())
+                .path("/api/appointments")
+                .queryParam("externalPatientId", externalPatientId)
+                .queryParam("page", 0)
+                .queryParam("size", 100)
+                .build()
+                .toUriString();
+
+        List<CatedraAppointmentDTO> appointments = execute(() -> restClient.get()
+                .uri(uri)
+                .headers(this::authorize)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {
+                }));
+
+        if (appointments == null) {
+            return Optional.empty();
+        }
+        return appointments.stream()
+                .filter(appointment -> appointment != null && processId.equals(appointment.reservationProcessId()))
+                .findFirst();
     }
 
     private void authorize(HttpHeaders headers) {
