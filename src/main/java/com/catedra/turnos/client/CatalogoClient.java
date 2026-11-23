@@ -8,6 +8,7 @@ import com.catedra.turnos.dto.catalogo.WeeklyScheduleDTO;
 import com.catedra.turnos.security.JwtService;
 import com.catedra.turnos.web.ApiException;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
@@ -27,7 +28,7 @@ public class CatalogoClient {
     private final JwtService jwtService;
     private final CatalogoProperties properties;
 
-    public CatalogoClient(RestClient catalogoRestClient, JwtService jwtService, CatalogoProperties properties) {
+    public CatalogoClient(@Qualifier("catalogoRestClient") RestClient catalogoRestClient, JwtService jwtService, CatalogoProperties properties) {
         this.restClient = catalogoRestClient;
         this.jwtService = jwtService;
         this.properties = properties;
