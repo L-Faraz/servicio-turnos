@@ -17,3 +17,7 @@ app:
     jwt:
       secret: test-secret-with-at-least-32-bytes-for-hs256
       issuer: servicio-turnos
+
+catedra:
+  api-base-url: http://catedra.test
+  jwt-token: test-token

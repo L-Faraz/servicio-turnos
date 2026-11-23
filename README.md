@@ -1,6 +1,6 @@
 # servicio-turnos
 
-Servicio de turnos de la cátedra. Este PR cubre la base del servicio: usuarios, autenticación JWT, integración HTTP con `Servicio-catalogo` y consulta de disponibilidad a partir de horarios del catálogo.
+Servicio de turnos de la cátedra. Cubre la base del servicio, autenticación JWT, integración HTTP con `Servicio-catalogo` y con el servicio central de cátedra para disponibilidad.
 
 ## Alcance actual
 
@@ -8,11 +8,13 @@ Servicio de turnos de la cátedra. Este PR cubre la base del servicio: usuarios,
 - JWT HS256 con roles `USER`, `ADMIN` y `SERVICE`.
 - Endpoint `/api/me`.
 - Cliente HTTP hacia `Servicio-catalogo` con JWT técnico de servicio.
-- Endpoint `/api/availability` que genera slots desde los horarios publicados por el catálogo.
+- Cliente HTTP hacia cátedra con JWT técnico para consultar `/api/appointment-occupancies`.
+- Endpoint `/api/availability` que genera slots desde los horarios del catálogo y descarta los ocupados por cátedra.
+- Prioridad de `CONFIRMED` sobre `HELD`; los holds vencidos no bloquean la disponibilidad.
 - Migración Flyway inicial de usuarios, autoridades y roles.
 - Health y métricas vía Actuator.
 
-Queda para próximos PR: integración con cátedra, holds, reservas, eventos Kafka, idempotencia y recuperación.
+Queda para próximos PR: holds, confirmación, listado/cancelación de reservas, eventos Kafka, idempotencia y recuperación.
 
 ## Requisitos
 
@@ -28,6 +30,8 @@ Copiar `.env.example` a `.env` y completar al menos:
 | `APP_JWT_SECRET` | Secreto HS256 de al menos 32 bytes. |
 | `APP_JWT_ISSUER` | Issuer de los JWT emitidos por turnos. |
 | `CATALOG_BASE_URL` | URL base de `Servicio-catalogo`. |
+| `CATEDRA_API_URL` | URL base del servicio central de cátedra. |
+| `CATEDRA_JWT_TOKEN` | JWT técnico de la cuenta de integración de cátedra; nunca se expone al cliente. |
 | `DB_URL` | JDBC de PostgreSQL. |
 | `DB_USERNAME` / `DB_PASSWORD` | Credenciales de PostgreSQL. |
 
@@ -40,7 +44,7 @@ curl http://localhost:8082/actuator/health
 docker compose logs -f servicio-turnos
 ```
 
-Para ejecutar contra el catálogo local, levantar primero `Servicio-catalogo` en `http://localhost:8081` y dejar `CATALOG_BASE_URL=http://host.docker.internal:8081`.
+Para ejecutar contra el catálogo local, levantar primero `Servicio-catalogo` en `http://localhost:8081` y dejar `CATALOG_BASE_URL=http://host.docker.internal:8081`. Para consultar ocupaciones reales, completar `CATEDRA_API_URL` y `CATEDRA_JWT_TOKEN` con la cuenta técnica; sin esos valores `/api/availability` responde `503 INTEGRATION_NOT_CONFIGURED`.
 
 ## Ejecución local con Gradle
 
@@ -63,12 +67,12 @@ export DB_PASSWORD='postgres'
 
 Los tests incluyen H2 para el contexto web, Testcontainers con PostgreSQL para validar Flyway y mocks para servicios.
 
-## Endpoints PR 1
+## Endpoints actuales
 
 | Método | Ruta | Descripción |
 | --- | --- | --- |
 | `POST` | `/api/register` | Registro de usuario. |
 | `POST` | `/api/authenticate` | Login y devolución del JWT. |
 | `GET` | `/api/me` | Usuario autenticado. |
-| `GET` | `/api/availability?professionalId=15&from=2026-11-23&to=2026-11-30` | Slots desde el catálogo. |
+| `GET` | `/api/availability?professionalId=15&from=2026-11-23&to=2026-11-30` | Slots del catálogo menos ocupaciones `CONFIRMED`/`HELD` de cátedra. |
 | `GET` | `/actuator/health` | Health check. |
