@@ -1,6 +1,9 @@
 package com.catedra.turnos.client;
 
 import com.catedra.turnos.config.CatedraProperties;
+import com.catedra.turnos.dto.catedra.ConfirmHoldRequestDTO;
+import com.catedra.turnos.dto.catedra.HoldRequestDTO;
+import com.catedra.turnos.dto.catedra.HoldResponseDTO;
 import com.catedra.turnos.dto.catedra.OccupancyResponseDTO;
 import com.catedra.turnos.web.ApiException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -8,6 +11,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -18,7 +22,9 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -113,6 +119,73 @@ class CatedraClientTest {
                     assertThat(exception.getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
                     assertThat(exception.getCode()).isEqualTo("INTEGRATION_NOT_CONFIGURED");
                 });
+        server.verify();
+    }
+
+    @Test
+    void createsHoldWithTechnicalToken() {
+        server.expect(requestTo("http://catedra.test/api/appointment-holds"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("Authorization", "Bearer technical-token"))
+                .andExpect(content().json("""
+                        {
+                          "professionalId": 15,
+                          "date": "2026-11-23",
+                          "startTime": "09:00:00",
+                          "externalPatientId": "juan.perez"
+                        }
+                        """))
+                .andRespond(withStatus(HttpStatus.CREATED)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {
+                                  "holdId": "hold-1",
+                                  "reservationProcessId": "process-1",
+                                  "status": "HELD",
+                                  "expiresAt": "2026-11-23T09:15:00Z"
+                                }
+                                """));
+
+        HoldResponseDTO response = client.createHold(new HoldRequestDTO(
+                15L,
+                LocalDate.of(2026, 11, 23),
+                java.time.LocalTime.of(9, 0),
+                "juan.perez"
+        ));
+
+        assertThat(response.holdId()).isEqualTo("hold-1");
+        assertThat(response.reservationProcessId()).isEqualTo("process-1");
+        assertThat(response.status()).isEqualTo("HELD");
+        server.verify();
+    }
+
+    @Test
+    void confirmsHoldWithPatientData() {
+        server.expect(requestTo("http://catedra.test/api/appointment-holds/hold-1/confirm"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("Authorization", "Bearer technical-token"))
+                .andExpect(content().json("""
+                        {
+                          "externalPatientId": "juan.perez",
+                          "patientFirstName": "Juan",
+                          "patientLastName": "Perez"
+                        }
+                        """))
+                .andRespond(withStatus(HttpStatus.ACCEPTED)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {
+                                  "reservationProcessId": "process-1",
+                                  "status": "WAITING_FOR_PHONE",
+                                  "expiresAt": "2026-11-23T09:20:00Z"
+                                }
+                                """));
+
+        var response = client.confirmHold("hold-1", new ConfirmHoldRequestDTO(
+                "juan.perez", "Juan", "Perez"
+        ));
+
+        assertThat(response.status()).isEqualTo("WAITING_FOR_PHONE");
         server.verify();
     }
 }

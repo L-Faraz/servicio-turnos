@@ -49,4 +49,20 @@ class PostgresFlywayIntegrationTest {
         assertThat(authorityTables).isEqualTo(1);
         assertThat(roles).isEqualTo(3);
     }
+
+    @Test
+    void flywayCreatesReservationTables() {
+        assertThat(tableExists("reservation_process")).isTrue();
+        assertThat(tableExists("appointment_hold")).isTrue();
+    }
+
+    private boolean tableExists(String tableName) {
+        Integer count = jdbcTemplate.queryForObject(
+                "select count(*) from information_schema.tables "
+                        + "where table_schema = 'public' and table_name = ?",
+                Integer.class,
+                tableName
+        );
+        return count != null && count == 1;
+    }
 }

@@ -1,6 +1,6 @@
 # servicio-turnos
 
-Servicio de turnos de la cátedra. Cubre la base del servicio, autenticación JWT, integración HTTP con `Servicio-catalogo` y con el servicio central de cátedra para disponibilidad.
+Servicio de turnos de la cátedra. Cubre la base del servicio, autenticación JWT, integración HTTP con `Servicio-catalogo` y con cátedra para disponibilidad, alta y confirmación de holds.
 
 ## Alcance actual
 
@@ -8,13 +8,15 @@ Servicio de turnos de la cátedra. Cubre la base del servicio, autenticación JW
 - JWT HS256 con roles `USER`, `ADMIN` y `SERVICE`.
 - Endpoint `/api/me`.
 - Cliente HTTP hacia `Servicio-catalogo` con JWT técnico de servicio.
-- Cliente HTTP hacia cátedra con JWT técnico para consultar `/api/appointment-occupancies`.
+- Cliente HTTP hacia cátedra con JWT técnico para ocupaciones, alta de holds y confirmación.
 - Endpoint `/api/availability` que genera slots desde los horarios del catálogo y descarta los ocupados por cátedra.
 - Prioridad de `CONFIRMED` sobre `HELD`; los holds vencidos no bloquean la disponibilidad.
-- Migración Flyway inicial de usuarios, autoridades y roles.
+- Alta y confirmación de holds con persistencia local de `reservation_process` y `appointment_hold`.
+- `externalPatientId` derivado del login autenticado; el cliente no puede elegirlo.
+- Migración Flyway de usuarios, autoridades, roles, procesos y holds.
 - Health y métricas vía Actuator.
 
-Queda para próximos PR: holds, confirmación, listado/cancelación de reservas, eventos Kafka, idempotencia y recuperación.
+Queda para próximos PR: teléfono vía Kafka, listado/cancelación de reservas, eventos de confirmación, idempotencia y recuperación.
 
 ## Requisitos
 
@@ -75,4 +77,6 @@ Los tests incluyen H2 para el contexto web, Testcontainers con PostgreSQL para v
 | `POST` | `/api/authenticate` | Login y devolución del JWT. |
 | `GET` | `/api/me` | Usuario autenticado. |
 | `GET` | `/api/availability?professionalId=15&from=2026-11-23&to=2026-11-30` | Slots del catálogo menos ocupaciones `CONFIRMED`/`HELD` de cátedra. |
+| `POST` | `/api/appointment-holds` | Crea un hold validando catálogo y disponibilidad. |
+| `POST` | `/api/appointment-holds/{holdId}/confirm` | Confirma el hold y deja el proceso en `WAITING_FOR_PHONE`. |
 | `GET` | `/actuator/health` | Health check. |

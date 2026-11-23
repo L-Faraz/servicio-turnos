@@ -1,6 +1,10 @@
 package com.catedra.turnos.client;
 
 import com.catedra.turnos.config.CatedraProperties;
+import com.catedra.turnos.dto.catedra.ConfirmHoldRequestDTO;
+import com.catedra.turnos.dto.catedra.ConfirmHoldResponseDTO;
+import com.catedra.turnos.dto.catedra.HoldRequestDTO;
+import com.catedra.turnos.dto.catedra.HoldResponseDTO;
 import com.catedra.turnos.dto.catedra.OccupancyResponseDTO;
 import com.catedra.turnos.web.ApiException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -8,6 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.ResourceAccessException;
@@ -62,6 +67,26 @@ public class CatedraClient {
                 response.to(),
                 response.occupancies() == null ? List.of() : response.occupancies()
         );
+    }
+
+    public HoldResponseDTO createHold(HoldRequestDTO request) {
+        return execute(() -> restClient.post()
+                .uri(baseUrl() + "/api/appointment-holds")
+                .headers(this::authorize)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(request)
+                .retrieve()
+                .body(HoldResponseDTO.class));
+    }
+
+    public ConfirmHoldResponseDTO confirmHold(String holdId, ConfirmHoldRequestDTO request) {
+        return execute(() -> restClient.post()
+                .uri(baseUrl() + "/api/appointment-holds/{holdId}/confirm", holdId)
+                .headers(this::authorize)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(request)
+                .retrieve()
+                .body(ConfirmHoldResponseDTO.class));
     }
 
     private void authorize(HttpHeaders headers) {
