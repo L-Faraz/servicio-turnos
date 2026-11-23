@@ -8,4 +8,6 @@ import java.util.Optional;
 public interface AppointmentHoldRepository extends JpaRepository<AppointmentHold, String> {
 
     Optional<AppointmentHold> findByHoldIdAndUserId(String holdId, Long userId);
+
+    Optional<AppointmentHold> findByHoldId(String holdId);
 }

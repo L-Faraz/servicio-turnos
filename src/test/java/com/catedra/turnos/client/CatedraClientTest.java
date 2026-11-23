@@ -188,4 +188,34 @@ class CatedraClientTest {
         assertThat(response.status()).isEqualTo("WAITING_FOR_PHONE");
         server.verify();
     }
+
+    @Test
+    void findsAppointmentByProcessIdForReconciliation() {
+        server.expect(requestTo("http://catedra.test/api/appointments"
+                        + "?externalPatientId=juan.perez&page=0&size=100"))
+                .andExpect(header("Authorization", "Bearer technical-token"))
+                .andRespond(withSuccess("""
+                        [
+                          {
+                            "reservationId": 8251,
+                            "reservationProcessId": "process-2",
+                            "externalPatientId": "otro.usuario",
+                            "status": "CONFIRMED"
+                          },
+                          {
+                            "reservationId": 8252,
+                            "reservationProcessId": "process-1",
+                            "externalPatientId": "juan.perez",
+                            "status": "PHONE_PENDING"
+                          }
+                        ]
+                        """, MediaType.APPLICATION_JSON));
+
+        var appointment = client.findAppointment("process-1", "juan.perez");
+
+        assertThat(appointment).isPresent();
+        assertThat(appointment.get().reservationId()).isEqualTo(8252L);
+        assertThat(appointment.get().status()).isEqualTo("PHONE_PENDING");
+        server.verify();
+    }
 }
