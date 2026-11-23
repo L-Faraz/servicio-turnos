@@ -4,6 +4,7 @@ import com.catedra.turnos.domain.ReservationProcess;
 import com.catedra.turnos.domain.enums.ProcessStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.Collection;
@@ -18,7 +19,19 @@ public interface ReservationProcessRepository extends JpaRepository<ReservationP
 
     Optional<ReservationProcess> findByHoldIdAndStatus(String holdId, ProcessStatus status);
 
+    List<ReservationProcess> findAllByUserId(Long userId);
+
     List<ReservationProcess> findAllByUserIdAndStatusIn(Long userId, Collection<ProcessStatus> statuses);
+
+    List<ReservationProcess> findAllByStatusInAndExpiresAtBefore(
+            Collection<ProcessStatus> statuses,
+            Instant expiresAt
+    );
+
+    List<ReservationProcess> findAllByStatusInAndUpdatedAtBefore(
+            Collection<ProcessStatus> statuses,
+            Instant updatedAt
+    );
 
     List<ReservationProcess> findByUserIdAndProfessionalIdAndAppointmentDateAndStartTimeAndStatusIn(
             Long userId,

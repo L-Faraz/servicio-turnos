@@ -62,6 +62,7 @@ class PostgresFlywayIntegrationTest {
         assertThat(tableExists("processed_event")).isTrue();
         assertThat(columnExists("reservation_process", "phone_attempt")).isTrue();
         assertThat(columnExists("reservation_process", "patient_phone")).isTrue();
+        assertThat(columnExists("reservation_process", "cancelled_at")).isTrue();
     }
 
     private boolean columnExists(String tableName, String columnName) {

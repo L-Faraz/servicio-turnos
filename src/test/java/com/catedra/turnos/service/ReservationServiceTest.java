@@ -8,17 +8,22 @@ import com.catedra.turnos.domain.AppUser;
 import com.catedra.turnos.domain.ReservationProcess;
 import com.catedra.turnos.domain.enums.ProcessStatus;
 import com.catedra.turnos.dto.AdditionalInformationSubmittedEvent;
+import com.catedra.turnos.dto.AppointmentPageDTO;
 import com.catedra.turnos.dto.AvailableSlotDTO;
 import com.catedra.turnos.dto.ConfirmedHoldResponse;
 import com.catedra.turnos.dto.CreateHoldRequest;
 import com.catedra.turnos.dto.CreatedHoldResponse;
 import com.catedra.turnos.dto.catalogo.CatalogProfessionalDTO;
 import com.catedra.turnos.dto.catalogo.WeeklyScheduleDTO;
+import com.catedra.turnos.dto.catedra.AppointmentPage;
+import com.catedra.turnos.dto.catedra.CancelResponseDTO;
+import com.catedra.turnos.dto.catedra.CatedraAppointmentDTO;
 import com.catedra.turnos.dto.catedra.ConfirmHoldResponseDTO;
 import com.catedra.turnos.dto.catedra.HoldResponseDTO;
 import com.catedra.turnos.repository.AppointmentHoldRepository;
 import com.catedra.turnos.repository.ReservationProcessRepository;
 import com.catedra.turnos.web.ApiException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -69,6 +74,8 @@ class ReservationServiceTest {
 
     @BeforeEach
     void setUp() {
+        CatedraProperties properties = new CatedraProperties();
+        properties.setGroupId("proyecto-prueba");
         reservationService = new ReservationService(
                 catalogoClient,
                 catedraClient,
@@ -76,7 +83,8 @@ class ReservationServiceTest {
                 processRepository,
                 holdRepository,
                 outboxService,
-                new CatedraProperties()
+                properties,
+                new SimpleMeterRegistry()
         );
 
         user = new AppUser();
@@ -123,6 +131,23 @@ class ReservationServiceTest {
         assertThat(processCaptor.getValue().getStatus()).isEqualTo(ProcessStatus.HELD);
         assertThat(holdCaptor.getValue().getHoldId()).isEqualTo("hold-1");
         assertThat(holdCaptor.getValue().getEndTime()).isEqualTo(LocalTime.of(9, 30));
+    }
+
+    @Test
+    void createHoldRejectsSlotWithActiveHold() {
+        CreateHoldRequest request = new CreateHoldRequest(15L, date, LocalTime.of(9, 0));
+        when(catalogoClient.getProfessional(15L)).thenReturn(enabledProfessional());
+        when(availabilityService.getAvailability(user, 15L, date, date)).thenReturn(List.of(
+                new AvailableSlotDTO(15L, date, LocalTime.of(9, 0), LocalTime.of(9, 30), false, "HELD")
+        ));
+
+        assertThatThrownBy(() -> reservationService.createHold(user, request))
+                .isInstanceOfSatisfying(com.catedra.turnos.web.ApiException.class, exception -> {
+                    assertThat(exception.getStatus()).isEqualTo(org.springframework.http.HttpStatus.CONFLICT);
+                    assertThat(exception.getCode()).isEqualTo("SLOT_ALREADY_HELD");
+                });
+
+        verify(catedraClient, never()).createHold(any());
     }
 
     @Test
@@ -208,7 +233,7 @@ class ReservationServiceTest {
         );
 
         assertThat(eventIdCaptor.getValue()).startsWith("phone-");
-        assertThat(topicCaptor.getValue()).isEqualTo("catedra.turnos.telefono.proyecto-l-faraz");
+        assertThat(topicCaptor.getValue()).isEqualTo("catedra.turnos.telefono.proyecto-prueba");
         assertThat(keyCaptor.getValue()).isEqualTo("process-1");
         assertThat(payloadCaptor.getValue()).isInstanceOf(AdditionalInformationSubmittedEvent.class);
         AdditionalInformationSubmittedEvent event = (AdditionalInformationSubmittedEvent) payloadCaptor.getValue();
@@ -238,12 +263,253 @@ class ReservationServiceTest {
         );
     }
 
+    @Test
+    void listAppointmentsEnrichesRemoteDataWithLocalProcess() {
+        LocalDate from = date;
+        LocalDate to = date.plusDays(1);
+        when(processRepository.findAllByUserId(1L)).thenReturn(List.of(waitingProcess()));
+        when(catedraClient.listAppointments(
+                "juan.perez", "CONFIRMED", from, to, 0, 100, null
+        )).thenReturn(new AppointmentPage(
+                List.of(remoteAppointment("process-1", "CONFIRMED", LocalTime.of(9, 0))),
+                1L,
+                null
+        ));
+
+        AppointmentPageDTO result = reservationService.listAppointments(
+                user, "confirmed", from, to, 0, 20, null
+        );
+
+        assertThat(result.totalCount()).isEqualTo(1L);
+        assertThat(result.link()).isNull();
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().get(0).localStatus()).isEqualTo("WAITING_FOR_PHONE");
+        assertThat(result.content().get(0).requestEventId()).isEqualTo("request-1");
+        assertThat(result.content().get(0).expiresAt()).isEqualTo(expiresAt);
+    }
+
+    @Test
+    void listAppointmentsExcludesReservationsWithoutLocalOwnership() {
+        when(processRepository.findAllByUserId(1L)).thenReturn(List.of(waitingProcess()));
+        when(catedraClient.listAppointments(
+                "juan.perez", null, null, null, 0, 100, null
+        )).thenReturn(new AppointmentPage(List.of(
+                remoteAppointment("process-2", "CONFIRMED", LocalTime.of(10, 0)),
+                remoteAppointment("process-1", "PHONE_PENDING", LocalTime.of(9, 0))
+        ), 2L, null));
+
+        AppointmentPageDTO result = reservationService.listAppointments(
+                user, null, null, null, 0, 20, null
+        );
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().get(0).reservationProcessId()).isEqualTo("process-1");
+        assertThat(result.totalCount()).isEqualTo(1L);
+    }
+
+    @Test
+    void listAppointmentsPaginatesOwnedAppointmentsLocally() {
+        LocalDate from = date;
+        LocalDate to = date.plusDays(1);
+        when(processRepository.findAllByUserId(1L)).thenReturn(List.of(
+                waitingProcess(),
+                processWithStatus("process-2", ProcessStatus.CONFIRMED)
+        ));
+        when(catedraClient.listAppointments(
+                "juan.perez", null, from, to, 0, 100, null
+        )).thenReturn(new AppointmentPage(List.of(
+                remoteAppointment("process-1", "PHONE_PENDING", LocalTime.of(9, 0)),
+                remoteAppointment("process-2", "CONFIRMED", LocalTime.of(10, 0))
+        ), 2L, null));
+
+        AppointmentPageDTO result = reservationService.listAppointments(
+                user, null, from, to, 0, 1, null
+        );
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().get(0).reservationProcessId()).isEqualTo("process-1");
+        assertThat(result.totalCount()).isEqualTo(2L);
+        assertThat(result.link()).contains("page=1").contains("size=1").contains("rel=\"next\"");
+    }
+
+    @Test
+    void listAppointmentsRejectsInvalidStatusAndRange() {
+        assertThatThrownBy(() -> reservationService.listAppointments(
+                user, "UNKNOWN", date, date, 0, 20, null
+        )).isInstanceOfSatisfying(ApiException.class, exception ->
+                assertThat(exception.getCode()).isEqualTo("INVALID_STATUS")
+        );
+
+        assertThatThrownBy(() -> reservationService.listAppointments(
+                user, null, date.plusDays(1), date, 0, 20, null
+        )).isInstanceOfSatisfying(ApiException.class, exception ->
+                assertThat(exception.getCode()).isEqualTo("INVALID_DATE_RANGE")
+        );
+    }
+
+    @Test
+    void listAppointmentsReadsAdditionalPagesWhenTotalCountRequiresIt() {
+        when(processRepository.findAllByUserId(1L)).thenReturn(List.of(waitingProcess()));
+        when(catedraClient.listAppointments(
+                "juan.perez", null, null, null, 0, 100, null
+        )).thenReturn(new AppointmentPage(
+                List.of(remoteAppointment("process-2", "CONFIRMED", LocalTime.of(10, 0))),
+                2L,
+                null
+        ));
+        when(catedraClient.listAppointments(
+                "juan.perez", null, null, null, 1, 100, null
+        )).thenReturn(new AppointmentPage(
+                List.of(remoteAppointment("process-1", "CONFIRMED", LocalTime.of(9, 0))),
+                2L,
+                null
+        ));
+
+        AppointmentPageDTO result = reservationService.listAppointments(
+                user, null, null, null, 0, 20, null
+        );
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().get(0).reservationProcessId()).isEqualTo("process-1");
+        assertThat(result.totalCount()).isEqualTo(1L);
+    }
+
+    @Test
+    void listAppointmentsRejectsInvalidSort() {
+        assertThatThrownBy(() -> reservationService.listAppointments(
+                user, null, null, null, 0, 20, "unknown,desc"
+        )).isInstanceOfSatisfying(ApiException.class, exception ->
+                assertThat(exception.getCode()).isEqualTo("INVALID_SORT")
+        );
+    }
+
+    @Test
+    void cancelAppointmentUpdatesLocalProcess() {
+        ReservationProcess process = heldProcess();
+        process.setStatus(ProcessStatus.CONFIRMED);
+        process.setReservationId(8251L);
+        when(processRepository.findByProcessIdAndUserId("process-1", 1L)).thenReturn(Optional.of(process));
+        Instant cancelledAt = Instant.now();
+        when(catedraClient.cancelAppointment("process-1", "motivo")).thenReturn(new CancelResponseDTO(
+                8251L, "process-1", "CANCELLED", cancelledAt, "motivo"
+        ));
+
+        CancelResponseDTO response = reservationService.cancelAppointment(user, "process-1", "motivo");
+
+        assertThat(response.status()).isEqualTo("CANCELLED");
+        assertThat(process.getStatus()).isEqualTo(ProcessStatus.CANCELLED);
+        assertThat(process.getCancelledAt()).isEqualTo(cancelledAt);
+        assertThat(process.getReason()).isEqualTo("motivo");
+        verify(catedraClient).cancelAppointment("process-1", "motivo");
+    }
+
+    @Test
+    void cancelAppointmentIsIdempotentWhenAlreadyCancelled() {
+        ReservationProcess process = heldProcess();
+        process.setStatus(ProcessStatus.CANCELLED);
+        when(processRepository.findByProcessIdAndUserId("process-1", 1L)).thenReturn(Optional.of(process));
+
+        CancelResponseDTO response = reservationService.cancelAppointment(user, "process-1", null);
+
+        assertThat(response.status()).isEqualTo("CANCELLED");
+        verify(catedraClient, never()).cancelAppointment(any(), any());
+    }
+
+    @Test
+    void cancelAppointmentRejectsProcessThatIsNotConfirmed() {
+        when(processRepository.findByProcessIdAndUserId("process-1", 1L))
+                .thenReturn(Optional.of(heldProcess()));
+
+        assertThatThrownBy(() -> reservationService.cancelAppointment(user, "process-1", null))
+                .isInstanceOfSatisfying(ApiException.class, exception -> {
+                    assertThat(exception.getStatus()).isEqualTo(org.springframework.http.HttpStatus.CONFLICT);
+                    assertThat(exception.getCode()).isEqualTo("RESERVATION_NOT_CANCELLABLE");
+                });
+        verify(catedraClient, never()).cancelAppointment(any(), any());
+    }
+
+    @Test
+    void cancelAppointmentReconcilesLostConfirmationBeforeCancelling() {
+        ReservationProcess process = waitingProcess();
+        when(processRepository.findByProcessIdAndUserId("process-1", 1L)).thenReturn(Optional.of(process));
+        when(catedraClient.findAppointment("process-1", "juan.perez")).thenReturn(Optional.of(
+                new CatedraAppointmentDTO(
+                        8251L, "process-1", "juan.perez", date, LocalTime.of(9, 0), LocalTime.of(9, 30),
+                        15L, "Ana", "Gomez", "Juan", "Perez", "+5492615551234",
+                        "CONFIRMED", Instant.now(), Instant.now(), null, null
+                )
+        ));
+        Instant cancelledAt = Instant.now();
+        when(catedraClient.cancelAppointment("process-1", "motivo")).thenReturn(new CancelResponseDTO(
+                8251L, "process-1", "CANCELLED", cancelledAt, "motivo"
+        ));
+
+        CancelResponseDTO response = reservationService.cancelAppointment(user, "process-1", "motivo");
+
+        assertThat(response.status()).isEqualTo("CANCELLED");
+        assertThat(process.getStatus()).isEqualTo(ProcessStatus.CANCELLED);
+        verify(catedraClient).cancelAppointment("process-1", "motivo");
+    }
+
+    @Test
+    void cancelAppointmentRejectsTooLongReason() {
+        assertThatThrownBy(() -> reservationService.cancelAppointment(user, "process-1", "x".repeat(501)))
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getCode()).isEqualTo("VALIDATION_ERROR")
+                );
+        verify(processRepository, never()).findByProcessIdAndUserId(any(), any());
+    }
+
+    @Test
+    void cancelAppointmentReconcilesRemoteCancellationAfterTimeout() {
+        ReservationProcess process = processWithStatus("process-1", ProcessStatus.CONFIRMED);
+        process.setReservationId(8251L);
+        Instant cancelledAt = Instant.now();
+        when(processRepository.findByProcessIdAndUserId("process-1", 1L)).thenReturn(Optional.of(process));
+        when(catedraClient.cancelAppointment("process-1", "motivo"))
+                .thenThrow(new ApiException(
+                        org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                        "CATEDRA_UNAVAILABLE",
+                        "sin conexión"
+                ));
+        when(catedraClient.findAppointment("process-1", "juan.perez")).thenReturn(Optional.of(
+                new CatedraAppointmentDTO(
+                        8251L, "process-1", "juan.perez", date, LocalTime.of(9, 0), LocalTime.of(9, 30),
+                        15L, "Ana", "Gomez", "Juan", "Perez", "+5492615551234",
+                        "CANCELLED", Instant.now(), null, cancelledAt, "motivo"
+                )
+        ));
+
+        CancelResponseDTO response = reservationService.cancelAppointment(user, "process-1", "motivo");
+
+        assertThat(response.status()).isEqualTo("CANCELLED");
+        assertThat(response.cancelledAt()).isEqualTo(cancelledAt);
+        assertThat(response.reason()).isEqualTo("motivo");
+        assertThat(process.getStatus()).isEqualTo(ProcessStatus.CANCELLED);
+        verify(processRepository).save(process);
+    }
+
     private ReservationProcess waitingProcess() {
         ReservationProcess process = heldProcess();
         process.setStatus(ProcessStatus.WAITING_FOR_PHONE);
         process.setRequestEventId("request-1");
         process.setExpiresAt(expiresAt);
         return process;
+    }
+
+    private ReservationProcess processWithStatus(String processId, ProcessStatus status) {
+        ReservationProcess process = heldProcess();
+        process.setProcessId(processId);
+        process.setStatus(status);
+        return process;
+    }
+
+    private CatedraAppointmentDTO remoteAppointment(String processId, String status, LocalTime startTime) {
+        return new CatedraAppointmentDTO(
+                8251L, processId, "juan.perez", date, startTime, startTime.plusMinutes(30),
+                15L, "Ana", "Gomez", "Juan", "Perez", "+5492615551234",
+                status, Instant.now(), null, null, null
+        );
     }
 
     private AppointmentHold heldHold(Instant holdExpiresAt) {

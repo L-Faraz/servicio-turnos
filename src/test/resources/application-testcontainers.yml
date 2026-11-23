@@ -26,3 +26,5 @@ catedra:
 turnos:
   outbox:
     enabled: false
+  recovery:
+    enabled: false

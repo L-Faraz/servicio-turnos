@@ -1,6 +1,6 @@
 # servicio-turnos
 
-Servicio de turnos de la cátedra. Cubre autenticación JWT, integración HTTP con `Servicio-catalogo` y cátedra, confirmación REST + Kafka, envío de teléfono vía outbox e idempotencia de eventos.
+Servicio de turnos de la cátedra. Cubre autenticación JWT, integración HTTP con `Servicio-catalogo` y cátedra, confirmación REST + Kafka, envío de teléfono vía outbox, idempotencia de eventos, listado, cancelación y recuperación.
 
 ## Alcance actual
 
@@ -17,11 +17,13 @@ Servicio de turnos de la cátedra. Cubre autenticación JWT, integración HTTP c
 - Consumidor Kafka de `alumnos.turnos.acciones.{groupId}` con DLT, ack manual e idempotencia por `eventId`.
 - Envío de `AdditionalInformationSubmitted` mediante outbox transaccional, reintentos y métricas.
 - Rechazo de teléfono con nuevo `eventId` determinista por intento sin reutilizar el `requestEventId`.
-- Eventos de confirmación, rechazo, expiración, proceso inválido y cancelación actualizan el proceso local.
-- Migración Flyway de usuarios, autoridades, roles, procesos, holds, outbox y eventos procesados.
-- Health y métricas vía Actuator.
+- Eventos de confirmación, rechazo, expiración, proceso inválido y cancelación actualizan el proceso local; los eventos tardíos no reabren estados finales.
+- Listado paginado de reservas propias con filtro local de propiedad, cancelación idempotente de reservas confirmadas y propagación de códigos funcionales.
+- Expiración local y reconciliación REST de procesos inactivos.
+- Métricas de listado, cancelación y recuperación además de health vía Actuator.
+- Migración Flyway de usuarios, autoridades, roles, procesos, holds, outbox, eventos procesados y cancelación.
 
-Queda para próximo PR: listado/cancelación de reservas, expiración local y recuperación/observabilidad adicional.
+Documentación adicional: [arquitectura](docs/ARQUITECTURA.md), [modelo de datos](docs/data-model.md), [contratos](docs/CONTRATOS.md), [idempotencia y recuperación](docs/idempotency-and-recovery.md), [seguridad](docs/security.md), [pruebas](docs/tests.md) y [evidencias](docs/EVIDENCIAS.md).
 
 ## Requisitos
 
@@ -38,13 +40,18 @@ Copiar `.env.example` a `.env` y completar al menos:
 | `APP_JWT_ISSUER` | Issuer de los JWT emitidos por turnos. |
 | `CATALOG_BASE_URL` | URL base de `Servicio-catalogo`. |
 | `CATEDRA_API_URL` | URL base del servicio central de cátedra. |
+| `CATEDRA_LOGIN_USERNAME` / `CATEDRA_LOGIN_PASSWORD` | Credenciales de la cuenta técnica; si se completan, el servicio hace login y recupera la configuración vigente al arrancar. |
 | `CATEDRA_JWT_TOKEN` | JWT técnico de la cuenta de integración de cátedra; nunca se expone al cliente. |
-| `CATEDRA_GROUP_ID` | Grupo de integración; por defecto `proyecto-l-faraz`. |
-| `CATEDRA_KAFKA_BOOTSTRAP_SERVERS` | Brokers Kafka. En cátedra, `172.17.201.1:9094` en `PLAINTEXT`. |
+| `CATEDRA_GROUP_ID` | `groupId` entregado con la cuenta técnica; sin valor por defecto. |
+| `CATEDRA_KAFKA_BOOTSTRAP_SERVERS` | Brokers Kafka entregados con la cuenta técnica; sin valor por defecto. |
 | `CATEDRA_KAFKA_ENABLED` | Habilita consumidor y publicación; desactivar en tests. |
 | `TURNOS_OUTBOX_ENABLED` | Habilita el publicador periódico del outbox. |
+| `TURNOS_RECOVERY_ENABLED` | Habilita expiración local y reconciliación periódica. |
+| `TURNOS_RECOVERY_STALE_AFTER_MS` | Antigüedad mínima para reconciliar un proceso. |
 | `DB_URL` | JDBC de PostgreSQL. |
 | `DB_USERNAME` / `DB_PASSWORD` | Credenciales de PostgreSQL. |
+
+La cuenta técnica se crea una sola vez con `POST /api/student/register` desde Postman o una herramienta HTTP equivalente. Con `CATEDRA_API_URL`, `CATEDRA_LOGIN_USERNAME` y `CATEDRA_LOGIN_PASSWORD`, el servicio autentica esa cuenta con `rememberMe=true`, recupera `GET /api/student/integration` y aplica el JWT, `groupId`, brokers y topics devueltos antes de crear los beans Kafka. Si no se completan las credenciales, se pueden informar los valores individuales de configuración.
 
 ## Ejecución local con Compose
 
@@ -55,14 +62,14 @@ curl http://localhost:8082/actuator/health
 docker compose logs -f servicio-turnos
 ```
 
-Para ejecutar contra el catálogo local, levantar primero `Servicio-catalogo` en `http://localhost:8081` y dejar `CATALOG_BASE_URL=http://host.docker.internal:8081`. Para consultar ocupaciones reales, completar `CATEDRA_API_URL` y `CATEDRA_JWT_TOKEN` con la cuenta técnica; sin esos valores `/api/availability` responde `503 INTEGRATION_NOT_CONFIGURED`.
+Para ejecutar contra el catálogo local, levantar primero `Servicio-catalogo` en `http://localhost:8081` y dejar `CATALOG_BASE_URL=http://host.docker.internal:8081`. Para consultar ocupaciones reales, completar el login técnico o `CATEDRA_API_URL` y `CATEDRA_JWT_TOKEN` con la cuenta técnica; sin esos valores `/api/availability` responde `503 INTEGRATION_NOT_CONFIGURED`.
 
-Para integrar con Kafka de cátedra, dejar `CATEDRA_GROUP_ID=proyecto-l-faraz`, `CATEDRA_KAFKA_BOOTSTRAP_SERVERS=172.17.201.1:9094` y `CATEDRA_KAFKA_SECURITY_PROTOCOL=PLAINTEXT`. Los topics y el consumer group se derivan del `groupId` salvo override explícito. El topic de teléfono es `catedra.turnos.telefono.proyecto-l-faraz` y la message key de todos los eventos es el `reservationProcessId`.
+Para integrar con Kafka de cátedra, completar `CATEDRA_GROUP_ID`, `CATEDRA_KAFKA_BOOTSTRAP_SERVERS` y `CATEDRA_KAFKA_SECURITY_PROTOCOL` con los valores entregados por la cátedra, o dejar que el login técnico los recupere. Los topics y el consumer group se derivan del `groupId` salvo override explícito. El topic de teléfono sigue el formato `catedra.turnos.telefono.{groupId}` y la message key de todos los eventos es el `reservationProcessId`.
 
 ## Ejecución local con Gradle
 
 ```bash
-export APP_JWT_SECRET='replace-with-at-least-32-bytes'
+export APP_JWT_SECRET='replace-with-at-least-32-byte-secret-value'
 export DB_URL='jdbc:postgresql://localhost:5433/turnos_db'
 export DB_USERNAME='postgres'
 export DB_PASSWORD='postgres'
@@ -91,4 +98,6 @@ Los tests incluyen H2 para el contexto web, Testcontainers con PostgreSQL para v
 | `POST` | `/api/appointment-holds` | Crea un hold validando catálogo y disponibilidad. |
 | `POST` | `/api/appointment-holds/{holdId}/confirm` | Revalida catálogo, confirma el hold y deja el proceso en `WAITING_FOR_PHONE`. |
 | `POST` | `/api/reservations/{processId}/phone` | Publica `AdditionalInformationSubmitted` en el outbox Kafka. |
+| `GET` | `/api/appointments` | Lista reservas propias con filtros y paginación. |
+| `POST` | `/api/appointments/{processId}/cancel` | Cancela una reserva propia. |
 | `GET` | `/actuator/health` | Health check. |

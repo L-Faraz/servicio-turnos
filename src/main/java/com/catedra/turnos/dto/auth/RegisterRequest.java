@@ -21,11 +21,11 @@ public record RegisterRequest(
         String password,
 
         @NotBlank
-        @Size(max = 50)
+        @Size(min = 2, max = 100)
         String firstName,
 
         @NotBlank
-        @Size(max = 50)
+        @Size(min = 2, max = 100)
         String lastName,
 
         @Size(max = 512)

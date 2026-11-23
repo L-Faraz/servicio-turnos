@@ -22,11 +22,12 @@ public class IdempotencyService {
     }
 
     @Transactional
-    public void markProcessed(String eventId, String eventType) {
+    public boolean tryMarkProcessed(String eventId, String eventType) {
         try {
             repository.saveAndFlush(new ProcessedEvent(eventId, eventType, Instant.now()));
+            return true;
         } catch (DataIntegrityViolationException exception) {
-            return;
+            return false;
         }
     }
 }

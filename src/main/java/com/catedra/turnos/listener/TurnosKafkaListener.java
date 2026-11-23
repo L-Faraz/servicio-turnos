@@ -11,6 +11,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 @Component
@@ -42,6 +43,7 @@ public class TurnosKafkaListener {
             groupId = "#{@catedraProperties.effectiveConsumerGroupId}",
             autoStartup = "${catedra.kafka-enabled:true}"
     )
+    @Transactional
     public void onMessage(ConsumerRecord<String, String> record, Acknowledgment acknowledgment) {
         TurnosEventDTO event;
         try {
@@ -53,14 +55,14 @@ public class TurnosKafkaListener {
 
         validate(record, event);
 
-        if (idempotencyService.isProcessed(event.eventId())) {
+        if (idempotencyService.isProcessed(event.eventId())
+                || !idempotencyService.tryMarkProcessed(event.eventId(), event.eventType())) {
             meterRegistry.counter("turnos.kafka.events", "outcome", "duplicate").increment();
             acknowledgment.acknowledge();
             return;
         }
 
         eventService.handle(event);
-        idempotencyService.markProcessed(event.eventId(), event.eventType());
         meterRegistry.counter("turnos.kafka.events", "outcome", "processed", "type", event.eventType()).increment();
         acknowledgment.acknowledge();
     }
@@ -78,11 +80,48 @@ public class TurnosKafkaListener {
             throw new IllegalArgumentException("La message key no coincide con reservationProcessId");
         }
         if (StringUtils.hasText(event.groupId())
-                && !properties.getEffectiveGroupId().equals(event.groupId())) {
+                && !event.groupId().equals(properties.getEffectiveGroupId())) {
             throw new IllegalArgumentException("El groupId del evento no corresponde a esta instalación");
         }
-        if (StringUtils.hasText(event.holdId()) && event.holdId().isBlank()) {
-            throw new IllegalArgumentException("holdId inválido");
+        require(event.occurredAt() != null, "occurredAt");
+
+        switch (event.eventType()) {
+            case "AdditionalInformationRequested" -> {
+                require(StringUtils.hasText(event.holdId()), "holdId");
+                require(StringUtils.hasText(event.requiredField()), "requiredField");
+                require(event.expiresAt() != null, "expiresAt");
+            }
+            case "AppointmentConfirmed" -> {
+                require(StringUtils.hasText(event.holdId()), "holdId");
+                require(event.reservationId() != null, "reservationId");
+                require(event.professionalId() != null, "professionalId");
+                require(event.date() != null, "date");
+                require(event.startTime() != null, "startTime");
+            }
+            case "AdditionalInformationRejected" -> {
+                require(StringUtils.hasText(event.holdId()), "holdId");
+                require(StringUtils.hasText(event.requestEventId()), "requestEventId");
+                require(StringUtils.hasText(event.reason()), "reason");
+                require(event.expiresAt() != null, "expiresAt");
+            }
+            case "AppointmentProcessExpired", "AppointmentProcessInvalid" -> {
+                require(StringUtils.hasText(event.holdId()), "holdId");
+                require(StringUtils.hasText(event.reason()), "reason");
+            }
+            case "AppointmentCancelled" -> {
+                require(StringUtils.hasText(event.holdId()), "holdId");
+                require(event.reservationId() != null, "reservationId");
+                require(event.date() != null, "date");
+                require(event.startTime() != null, "startTime");
+            }
+            default -> {
+            }
+        }
+    }
+
+    private void require(boolean condition, String field) {
+        if (!condition) {
+            throw new IllegalArgumentException("El evento de turnos no cumple el contrato: falta " + field);
         }
     }
 }

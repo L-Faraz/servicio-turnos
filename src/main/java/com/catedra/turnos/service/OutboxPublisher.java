@@ -1,11 +1,11 @@
 package com.catedra.turnos.service;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
-@ConditionalOnProperty(name = "turnos.outbox.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnExpression("${turnos.outbox.enabled:true} and ${catedra.kafka-enabled:true}")
 public class OutboxPublisher {
 
     private final OutboxService outboxService;

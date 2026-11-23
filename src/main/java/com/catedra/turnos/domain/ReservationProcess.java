@@ -76,8 +76,11 @@ public class ReservationProcess {
     @Column(name = "expires_at")
     private Instant expiresAt;
 
-    @Column(length = 255)
+    @Column(length = 500)
     private String reason;
+
+    @Column(name = "cancelled_at")
+    private Instant cancelledAt;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
