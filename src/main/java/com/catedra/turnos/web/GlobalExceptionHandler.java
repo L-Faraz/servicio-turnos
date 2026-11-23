@@ -7,6 +7,8 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.util.Map;
+
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -26,6 +28,13 @@ public class GlobalExceptionHandler {
         );
         problem.setTitle("VALIDATION_ERROR");
         problem.setProperty("code", "VALIDATION_ERROR");
+        problem.setProperty("fieldErrors", exception.getBindingResult().getFieldErrors().stream()
+                .map(error -> Map.of(
+                        "objectName", error.getObjectName(),
+                        "field", error.getField(),
+                        "message", error.getDefaultMessage() == null ? "" : error.getDefaultMessage()
+                ))
+                .toList());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
     }
 }

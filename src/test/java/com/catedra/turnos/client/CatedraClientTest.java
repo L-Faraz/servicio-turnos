@@ -1,6 +1,8 @@
 package com.catedra.turnos.client;
 
 import com.catedra.turnos.config.CatedraProperties;
+import com.catedra.turnos.dto.catedra.AppointmentPage;
+import com.catedra.turnos.dto.catedra.CancelResponseDTO;
 import com.catedra.turnos.dto.catedra.ConfirmHoldRequestDTO;
 import com.catedra.turnos.dto.catedra.HoldRequestDTO;
 import com.catedra.turnos.dto.catedra.HoldResponseDTO;
@@ -19,6 +21,8 @@ import org.springframework.web.client.RestClient;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -216,6 +220,124 @@ class CatedraClientTest {
         assertThat(appointment).isPresent();
         assertThat(appointment.get().reservationId()).isEqualTo(8252L);
         assertThat(appointment.get().status()).isEqualTo("PHONE_PENDING");
+        server.verify();
+    }
+
+    @Test
+    void findsAppointmentOnLaterPage() {
+        String firstPage = "[" + IntStream.range(0, 100)
+                .mapToObj(index -> "{\"reservationProcessId\":\"process-" + (index + 100)
+                        + "\",\"status\":\"CONFIRMED\"}")
+                .collect(Collectors.joining(",")) + "]";
+
+        server.expect(requestTo("http://catedra.test/api/appointments"
+                        + "?externalPatientId=juan.perez&page=0&size=100"))
+                .andRespond(withSuccess(firstPage, MediaType.APPLICATION_JSON)
+                        .header("X-Total-Count", "150"));
+        server.expect(requestTo("http://catedra.test/api/appointments"
+                        + "?externalPatientId=juan.perez&page=1&size=100"))
+                .andRespond(withSuccess("""
+                        [
+                          {
+                            "reservationId": 8252,
+                            "reservationProcessId": "process-1",
+                            "externalPatientId": "juan.perez",
+                            "status": "CONFIRMED"
+                          }
+                        ]
+                        """, MediaType.APPLICATION_JSON)
+                        .header("X-Total-Count", "150"));
+
+        var appointment = client.findAppointment("process-1", "juan.perez");
+
+        assertThat(appointment).isPresent();
+        assertThat(appointment.get().reservationId()).isEqualTo(8252L);
+        server.verify();
+    }
+
+    @Test
+    void findsAppointmentUsingTotalCountWithSmallPages() {
+        server.expect(requestTo("http://catedra.test/api/appointments"
+                        + "?externalPatientId=juan.perez&page=0&size=100"))
+                .andRespond(withSuccess("""
+                        [
+                          {
+                            "reservationProcessId": "process-2",
+                            "status": "CONFIRMED"
+                          }
+                        ]
+                        """, MediaType.APPLICATION_JSON)
+                        .header("X-Total-Count", "2"));
+        server.expect(requestTo("http://catedra.test/api/appointments"
+                        + "?externalPatientId=juan.perez&page=1&size=100"))
+                .andRespond(withSuccess("""
+                        [
+                          {
+                            "reservationId": 8252,
+                            "reservationProcessId": "process-1",
+                            "status": "CONFIRMED"
+                          }
+                        ]
+                        """, MediaType.APPLICATION_JSON)
+                        .header("X-Total-Count", "2"));
+
+        var appointment = client.findAppointment("process-1", "juan.perez");
+
+        assertThat(appointment).isPresent();
+        assertThat(appointment.get().reservationId()).isEqualTo(8252L);
+        server.verify();
+    }
+
+    @Test
+    void listsAppointmentsWithFiltersAndPaginationHeaders() {
+        server.expect(requestTo("http://catedra.test/api/appointments"
+                        + "?externalPatientId=juan.perez&page=0&size=20&status=CONFIRMED"
+                        + "&from=2026-11-23&to=2026-11-30&sort=appointmentDate,desc"))
+                .andExpect(header("Authorization", "Bearer technical-token"))
+                .andRespond(withSuccess("""
+                        [
+                          {
+                            "reservationProcessId": "process-1",
+                            "externalPatientId": "juan.perez",
+                            "status": "CONFIRMED"
+                          }
+                        ]
+                        """, MediaType.APPLICATION_JSON)
+                        .header("X-Total-Count", "1")
+                        .header("Link", "<http://catedra.test/api/appointments?page=1>; rel=\"next\""));
+
+        AppointmentPage page = client.listAppointments(
+                "juan.perez", "CONFIRMED",
+                LocalDate.of(2026, 11, 23), LocalDate.of(2026, 11, 30),
+                0, 20, "appointmentDate,desc"
+        );
+
+        assertThat(page.content()).hasSize(1);
+        assertThat(page.totalCount()).isEqualTo(1L);
+        assertThat(page.link()).contains("rel=\"next\"");
+        server.verify();
+    }
+
+    @Test
+    void cancelsAppointmentWithReason() {
+        server.expect(requestTo("http://catedra.test/api/appointments/process-1/cancel"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("Authorization", "Bearer technical-token"))
+                .andExpect(content().json("{\"reason\":\"Cambio solicitado por el usuario\"}"))
+                .andRespond(withSuccess("""
+                        {
+                          "reservationId": 8251,
+                          "reservationProcessId": "process-1",
+                          "status": "CANCELLED",
+                          "cancelledAt": "2026-11-23T15:10:00Z",
+                          "cancellationReason": "Cambio solicitado por el usuario"
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        CancelResponseDTO response = client.cancelAppointment("process-1", "Cambio solicitado por el usuario");
+
+        assertThat(response.status()).isEqualTo("CANCELLED");
+        assertThat(response.reason()).isEqualTo("Cambio solicitado por el usuario");
         server.verify();
     }
 }

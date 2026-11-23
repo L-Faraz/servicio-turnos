@@ -9,6 +9,7 @@ public class TurnosProperties {
 
     private final Availability availability = new Availability();
     private final Outbox outbox = new Outbox();
+    private final Recovery recovery = new Recovery();
 
     public Availability getAvailability() {
         return availability;
@@ -16,6 +17,10 @@ public class TurnosProperties {
 
     public Outbox getOutbox() {
         return outbox;
+    }
+
+    public Recovery getRecovery() {
+        return recovery;
     }
 
     public static class Availability {
@@ -68,6 +73,46 @@ public class TurnosProperties {
 
         public void setRetryMultiplier(long retryMultiplier) {
             this.retryMultiplier = Math.max(1, retryMultiplier);
+        }
+    }
+
+    public static class Recovery {
+
+        private boolean enabled = true;
+        private long intervalMs = 60000;
+        private long initialDelayMs = 10000;
+        private long staleAfterMs = 300000;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public long getIntervalMs() {
+            return Math.max(1000, intervalMs);
+        }
+
+        public void setIntervalMs(long intervalMs) {
+            this.intervalMs = Math.max(1000, intervalMs);
+        }
+
+        public long getInitialDelayMs() {
+            return Math.max(0, initialDelayMs);
+        }
+
+        public void setInitialDelayMs(long initialDelayMs) {
+            this.initialDelayMs = Math.max(0, initialDelayMs);
+        }
+
+        public long getStaleAfterMs() {
+            return Math.max(1000, staleAfterMs);
+        }
+
+        public void setStaleAfterMs(long staleAfterMs) {
+            this.staleAfterMs = Math.max(1000, staleAfterMs);
         }
     }
 }

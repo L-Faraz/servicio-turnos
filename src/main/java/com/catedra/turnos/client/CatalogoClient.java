@@ -84,7 +84,9 @@ public class CatalogoClient {
                 .anyMatch(schedule -> schedule.enabled()
                         && schedule.dayOfWeek() == dayOfWeek
                         && schedule.startTime() != null
-                        && !schedule.startTime().isAfter(startTime));
+                        && schedule.endTime() != null
+                        && !schedule.startTime().isAfter(startTime)
+                        && startTime.isBefore(schedule.endTime()));
     }
 
     private void authorize(org.springframework.http.HttpHeaders headers) {

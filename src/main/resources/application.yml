@@ -55,13 +55,13 @@ catedra:
   jwt-token: ${CATEDRA_JWT_TOKEN:}
   connect-timeout-ms: ${CATEDRA_CONNECT_TIMEOUT_MS:2000}
   read-timeout-ms: ${CATEDRA_READ_TIMEOUT_MS:3000}
-  group-id: ${CATEDRA_GROUP_ID:proyecto-l-faraz}
-  kafka-enabled: ${CATEDRA_KAFKA_ENABLED:true}
-  kafka-bootstrap-servers: ${CATEDRA_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-  kafka-consumer-group-id: ${CATEDRA_KAFKA_CONSUMER_GROUP_ID:alumnos-${CATEDRA_GROUP_ID:proyecto-l-faraz}}
-  kafka-appointment-actions-topic: ${CATEDRA_KAFKA_APPOINTMENT_ACTIONS_TOPIC:alumnos.turnos.acciones.${CATEDRA_GROUP_ID:proyecto-l-faraz}}
-  kafka-appointment-phone-topic: ${CATEDRA_KAFKA_APPOINTMENT_PHONE_TOPIC:catedra.turnos.telefono.${CATEDRA_GROUP_ID:proyecto-l-faraz}}
-  kafka-dlt-topic: ${CATEDRA_KAFKA_DLT_TOPIC:alumnos.turnos.acciones.${CATEDRA_GROUP_ID:proyecto-l-faraz}.dlt}
+  group-id: ${CATEDRA_GROUP_ID:}
+  kafka-enabled: ${CATEDRA_KAFKA_ENABLED:false}
+  kafka-bootstrap-servers: ${CATEDRA_KAFKA_BOOTSTRAP_SERVERS:}
+  kafka-consumer-group-id: ${CATEDRA_KAFKA_CONSUMER_GROUP_ID:}
+  kafka-appointment-actions-topic: ${CATEDRA_KAFKA_APPOINTMENT_ACTIONS_TOPIC:}
+  kafka-appointment-phone-topic: ${CATEDRA_KAFKA_APPOINTMENT_PHONE_TOPIC:}
+  kafka-dlt-topic: ${CATEDRA_KAFKA_DLT_TOPIC:}
   kafka-security-protocol: ${CATEDRA_KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
   kafka-sasl-mechanism: ${CATEDRA_KAFKA_SASL_MECHANISM:}
   kafka-sasl-jaas-config: ${CATEDRA_KAFKA_SASL_JAAS_CONFIG:}
@@ -85,3 +85,8 @@ turnos:
     retry-initial-ms: ${TURNOS_OUTBOX_RETRY_INITIAL_MS:2000}
     retry-multiplier: ${TURNOS_OUTBOX_RETRY_MULTIPLIER:2}
     publish-interval-ms: ${TURNOS_OUTBOX_PUBLISH_INTERVAL_MS:2000}
+  recovery:
+    enabled: ${TURNOS_RECOVERY_ENABLED:true}
+    interval-ms: ${TURNOS_RECOVERY_INTERVAL_MS:60000}
+    initial-delay-ms: ${TURNOS_RECOVERY_INITIAL_DELAY_MS:10000}
+    stale-after-ms: ${TURNOS_RECOVERY_STALE_AFTER_MS:300000}

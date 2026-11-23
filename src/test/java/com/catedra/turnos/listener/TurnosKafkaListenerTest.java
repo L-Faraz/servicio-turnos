@@ -16,6 +16,7 @@ import org.springframework.kafka.support.Acknowledgment;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -36,11 +37,14 @@ class TurnosKafkaListenerTest {
 
     @BeforeEach
     void setUp() {
+        lenient().when(idempotencyService.tryMarkProcessed(any(), any())).thenReturn(true);
+        CatedraProperties properties = new CatedraProperties();
+        properties.setGroupId("proyecto-prueba");
         listener = new TurnosKafkaListener(
-                new ObjectMapper(),
+                new ObjectMapper().findAndRegisterModules(),
                 eventService,
                 idempotencyService,
-                new CatedraProperties(),
+                properties,
                 new SimpleMeterRegistry()
         );
     }
@@ -50,7 +54,7 @@ class TurnosKafkaListenerTest {
         listener.onMessage(record(validPayload()), acknowledgment);
 
         verify(eventService).handle(any(TurnosEventDTO.class));
-        verify(idempotencyService).markProcessed("event-1", "AdditionalInformationRejected");
+        verify(idempotencyService).tryMarkProcessed("event-1", "AdditionalInformationRejected");
         verify(acknowledgment).acknowledge();
     }
 
@@ -87,8 +91,20 @@ class TurnosKafkaListenerTest {
         verify(eventService, never()).handle(any(TurnosEventDTO.class));
     }
 
+    @Test
+    void rejectsEventWithoutRequiredTypeSpecificField() {
+        String payload = validPayload().replace("\"holdId\": \"hold-1\",\n", "");
+
+        assertThatThrownBy(() -> listener.onMessage(record(payload), acknowledgment))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("holdId");
+
+        verify(eventService, never()).handle(any());
+        verify(acknowledgment, never()).acknowledge();
+    }
+
     private ConsumerRecord<String, String> record(String payload) {
-        return new ConsumerRecord<>("alumnos.turnos.acciones.proyecto-l-faraz", 0, 0L, "process-1", payload);
+        return new ConsumerRecord<>("alumnos.turnos.acciones.proyecto-prueba", 0, 0L, "process-1", payload);
     }
 
     private String validPayload() {
@@ -96,12 +112,14 @@ class TurnosKafkaListenerTest {
                 {
                   "eventId": "event-1",
                   "eventType": "AdditionalInformationRejected",
-                  "groupId": "proyecto-l-faraz",
+                  "groupId": "proyecto-prueba",
                   "reservationProcessId": "process-1",
                   "holdId": "hold-1",
                   "requestEventId": "request-1",
                   "reason": "INVALID_PHONE_NUMBER",
                   "message": "Telefono invalido",
+                  "occurredAt": "2026-11-23T18:00:00Z",
+                  "expiresAt": "2026-11-23T18:30:00Z",
                   "schemaVersion": 1
                 }
                 """;

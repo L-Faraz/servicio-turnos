@@ -8,6 +8,7 @@ import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.config.SslConfigs;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.annotation.EnableKafka;
@@ -29,6 +30,7 @@ import java.util.Map;
 
 @EnableKafka
 @Configuration
+@ConditionalOnProperty(name = "catedra.kafka-enabled", havingValue = "true", matchIfMissing = true)
 public class KafkaConfig {
 
     private final CatedraProperties properties;
@@ -39,9 +41,13 @@ public class KafkaConfig {
 
     @Bean
     public ConsumerFactory<String, String> consumerFactory() {
+        String groupId = properties.getEffectiveConsumerGroupId();
+        if (!StringUtils.hasText(groupId)) {
+            throw new IllegalStateException("catedra.group-id es obligatorio para consumir Kafka");
+        }
         Map<String, Object> config = securityConfig();
         config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers());
-        config.put(ConsumerConfig.GROUP_ID_CONFIG, properties.getEffectiveConsumerGroupId());
+        config.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
@@ -90,9 +96,11 @@ public class KafkaConfig {
     }
 
     private String bootstrapServers() {
-        return StringUtils.hasText(properties.getKafkaBootstrapServers())
-                ? properties.getKafkaBootstrapServers()
-                : "localhost:9092";
+        String servers = properties.getKafkaBootstrapServers();
+        if (!StringUtils.hasText(servers)) {
+            throw new IllegalStateException("catedra.kafka-bootstrap-servers es obligatorio para usar Kafka");
+        }
+        return servers;
     }
 
     private Map<String, Object> securityConfig() {

@@ -46,10 +46,8 @@ public class ReservationEventService {
         }
 
         ReservationProcess process = findProcess(event);
-        if (process.getStatus() == ProcessStatus.CONFIRMED
-                || process.getStatus() == ProcessStatus.CANCELLED
-                || process.getStatus() == ProcessStatus.EXPIRED
-                || process.getStatus() == ProcessStatus.INVALID) {
+        if (process.getStatus().isFinal()) {
+            countLate(event);
             return;
         }
 
@@ -67,6 +65,10 @@ public class ReservationEventService {
 
     private void handleConfirmed(TurnosEventDTO event) {
         ReservationProcess process = findProcess(event);
+        if (isLockedFinal(process, ProcessStatus.CONFIRMED, event)) {
+            return;
+        }
+
         process.setStatus(ProcessStatus.CONFIRMED);
         if (event.reservationId() != null) {
             process.setReservationId(event.reservationId());
@@ -78,9 +80,7 @@ public class ReservationEventService {
 
     private void handleRejected(TurnosEventDTO event) {
         ReservationProcess process = findProcess(event);
-        if (process.getStatus() == ProcessStatus.CONFIRMED
-                || process.getStatus() == ProcessStatus.CANCELLED
-                || process.getStatus() == ProcessStatus.EXPIRED) {
+        if (isLockedFinal(process, null, event)) {
             return;
         }
 
@@ -95,6 +95,10 @@ public class ReservationEventService {
 
     private void handleExpired(TurnosEventDTO event) {
         ReservationProcess process = findProcess(event);
+        if (isLockedFinal(process, ProcessStatus.EXPIRED, event)) {
+            return;
+        }
+
         process.setStatus(ProcessStatus.EXPIRED);
         process.setReason(StringUtils.hasText(event.reason()) ? event.reason() : "HOLD_EXPIRED");
         process.setUpdatedAt(Instant.now());
@@ -103,6 +107,10 @@ public class ReservationEventService {
 
     private void handleInvalid(TurnosEventDTO event) {
         ReservationProcess process = findProcess(event);
+        if (isLockedFinal(process, ProcessStatus.INVALID, event)) {
+            return;
+        }
+
         process.setStatus(ProcessStatus.INVALID);
         process.setReason(StringUtils.hasText(event.reason()) ? event.reason() : "REQUEST_EVENT_MISMATCH");
         process.setUpdatedAt(Instant.now());
@@ -111,13 +119,37 @@ public class ReservationEventService {
 
     private void handleCancelled(TurnosEventDTO event) {
         ReservationProcess process = findProcess(event);
+        if (process.getStatus().isFinal()
+                && process.getStatus() != ProcessStatus.CANCELLED
+                && process.getStatus() != ProcessStatus.CONFIRMED) {
+            countLate(event);
+            return;
+        }
+
         process.setStatus(ProcessStatus.CANCELLED);
         process.setReason(event.reason());
+        process.setCancelledAt(event.occurredAt());
         if (event.reservationId() != null) {
             process.setReservationId(event.reservationId());
         }
         process.setUpdatedAt(Instant.now());
         processRepository.save(process);
+    }
+
+    private boolean isLockedFinal(ReservationProcess process, ProcessStatus allowedFinal, TurnosEventDTO event) {
+        if (!process.getStatus().isFinal()) {
+            return false;
+        }
+        if (allowedFinal != null && process.getStatus() == allowedFinal) {
+            return false;
+        }
+        countLate(event);
+        return true;
+    }
+
+    private void countLate(TurnosEventDTO event) {
+        meterRegistry.counter("turnos.kafka.events", "outcome", "late_final", "type", event.eventType())
+                .increment();
     }
 
     private ReservationProcess findProcess(TurnosEventDTO event) {

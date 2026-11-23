@@ -26,10 +26,12 @@ class ReservationEventServiceTest {
 
     private ReservationEventService eventService;
     private ReservationProcess process;
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
-        eventService = new ReservationEventService(processRepository, new SimpleMeterRegistry());
+        meterRegistry = new SimpleMeterRegistry();
+        eventService = new ReservationEventService(processRepository, meterRegistry);
         process = new ReservationProcess();
         process.setProcessId("process-1");
         process.setStatus(ProcessStatus.WAITING_FOR_PHONE);
@@ -70,7 +72,7 @@ class ReservationEventServiceTest {
     @Test
     void confirmedUpdatesStatusAndReservationId() {
         eventService.handle(new TurnosEventDTO(
-                "confirm-1", "AppointmentConfirmed", "proyecto-l-faraz", "process-1", "hold-1",
+                "confirm-1", "AppointmentConfirmed", "proyecto-prueba", "process-1", "hold-1",
                 "request-1", null, null, null, "CONFIRMED", 8251L, 15L, null, null, null,
                 Instant.now(), Map.of(), 1
         ));
@@ -84,16 +86,34 @@ class ReservationEventServiceTest {
         eventService.handle(event("expired-1", "AppointmentProcessExpired", null));
         assertThat(process.getStatus()).isEqualTo(ProcessStatus.EXPIRED);
 
+        process.setStatus(ProcessStatus.WAITING_FOR_PHONE);
         eventService.handle(event("invalid-1", "AppointmentProcessInvalid", null));
         assertThat(process.getStatus()).isEqualTo(ProcessStatus.INVALID);
 
+        process.setStatus(ProcessStatus.CONFIRMED);
         eventService.handle(event("cancel-1", "AppointmentCancelled", null));
         assertThat(process.getStatus()).isEqualTo(ProcessStatus.CANCELLED);
+        assertThat(meterRegistry.find("turnos.kafka.events")
+                .tags("outcome", "late_final")
+                .counter()).isNull();
+    }
+
+    @Test
+    void lateConfirmationDoesNotReopenFinalState() {
+        process.setStatus(ProcessStatus.EXPIRED);
+
+        eventService.handle(new TurnosEventDTO(
+                "confirm-late", "AppointmentConfirmed", "proyecto-prueba", "process-1", "hold-1",
+                "request-1", null, null, null, "CONFIRMED", 8251L, 15L, null, null, null,
+                Instant.now(), java.util.Map.of(), 1
+        ));
+
+        assertThat(process.getStatus()).isEqualTo(ProcessStatus.EXPIRED);
     }
 
     private TurnosEventDTO event(String eventId, String eventType, Instant expiresAt) {
         return new TurnosEventDTO(
-                eventId, eventType, "proyecto-l-faraz", "process-1", "hold-1", "request-1",
+                eventId, eventType, "proyecto-prueba", "process-1", "hold-1", "request-1",
                 "PHONE_NUMBER", "mensaje", "INVALID_PHONE_NUMBER", null, null, null, null, null,
                 expiresAt, Instant.now(), Map.of(), 1
         );

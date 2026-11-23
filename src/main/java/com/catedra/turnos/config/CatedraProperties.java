@@ -231,30 +231,38 @@ public class CatedraProperties {
     }
 
     public String getEffectiveGroupId() {
-        return StringUtils.hasText(groupId) ? groupId : "proyecto-l-faraz";
+        return StringUtils.hasText(groupId) ? groupId : null;
     }
 
     public String getEffectiveConsumerGroupId() {
-        return StringUtils.hasText(kafkaConsumerGroupId)
-                ? kafkaConsumerGroupId
-                : "alumnos-" + getEffectiveGroupId();
+        if (StringUtils.hasText(kafkaConsumerGroupId)) {
+            return kafkaConsumerGroupId;
+        }
+        String effectiveGroupId = getEffectiveGroupId();
+        return effectiveGroupId == null ? null : "alumnos-" + effectiveGroupId;
     }
 
     public String getEffectiveActionsTopic() {
-        return StringUtils.hasText(kafkaAppointmentActionsTopic)
-                ? kafkaAppointmentActionsTopic
-                : "alumnos.turnos.acciones." + getEffectiveGroupId();
+        if (StringUtils.hasText(kafkaAppointmentActionsTopic)) {
+            return kafkaAppointmentActionsTopic;
+        }
+        String effectiveGroupId = getEffectiveGroupId();
+        return effectiveGroupId == null ? null : "alumnos.turnos.acciones." + effectiveGroupId;
     }
 
     public String getEffectivePhoneTopic() {
-        return StringUtils.hasText(kafkaAppointmentPhoneTopic)
-                ? kafkaAppointmentPhoneTopic
-                : "catedra.turnos.telefono." + getEffectiveGroupId();
+        if (StringUtils.hasText(kafkaAppointmentPhoneTopic)) {
+            return kafkaAppointmentPhoneTopic;
+        }
+        String effectiveGroupId = getEffectiveGroupId();
+        return effectiveGroupId == null ? null : "catedra.turnos.telefono." + effectiveGroupId;
     }
 
     public String getEffectiveDltTopic() {
-        return StringUtils.hasText(kafkaDltTopic)
-                ? kafkaDltTopic
-                : getEffectiveActionsTopic() + ".dlt";
+        if (StringUtils.hasText(kafkaDltTopic)) {
+            return kafkaDltTopic;
+        }
+        String actionsTopic = getEffectiveActionsTopic();
+        return actionsTopic == null ? null : actionsTopic + ".dlt";
     }
 }
